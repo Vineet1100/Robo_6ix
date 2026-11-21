@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Robotaxi Prototype — Downtown Toronto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <div>
+    <h1>Robotaxi Prototype — Downtown Toronto</h1>
+    <div class="sub">Flask · pandas · NumPy · scikit-learn · BeautifulSoup back-end · real-time sim in the browser</div>
+  </div>
+  <div class="sp"></div>
+  <button class="cta" id="bookTop">📱 Request a ride</button>
+  <span class="pill">sensor <b>60 m · 360°</b></span>
+  <span class="pill">control <b>pure pursuit</b></span>
+  <span class="pill">localization <b>odometry + fixes</b></span>
+  <span class="pill">planner <b>10 Hz</b></span>
+  <span class="pill" id="pyPill">python <b>…</b></span>
+  <span class="pill">sim t <b id="simClock">00:00</b></span>
+</header>
+<main>
+  <nav id="pnav">
+    <a href="#overview" data-page="overview"><span class="ic">🏠</span><span class="lb">Overview</span></a>
+    <a href="#perception" data-page="perception"><span class="ic">🎯</span><span class="lb">Perception & Decisions</span></a>
+    <a href="#ride" data-page="ride"><span class="ic">📱</span><span class="lb">Ride-hailing</span></a>
+    <a href="#nav" data-page="nav"><span class="ic">🧭</span><span class="lb">Navigation & Steering</span></a>
+    <a href="#traffic" data-page="traffic"><span class="ic">🚦</span><span class="lb">Traffic Rules</span></a>
+    <a href="#control" data-page="control"><span class="ic">🎛️</span><span class="lb">PID & Ziegler–Nichols</span></a>
+    <a href="#localization" data-page="localization"><span class="ic">📍</span><span class="lb">Localization</span></a>
+    <a href="#python" data-page="python"><span class="ic">🐍</span><span class="lb">Python Analytics</span></a>
+    <a href="#log" data-page="log"><span class="ic">📜</span><span class="lb">Event Log</span></a>
+    <a href="#about" data-page="about"><span class="ic">📘</span><span class="lb">How It Works</span></a>
+    <div class="navfoot">Tip: keys 1–6 run hazard tests · B books a ride</div>
+  </nav>
+  <div id="stage">
+    <div id="tilt"><canvas id="cv"></canvas></div>
+    <div id="loading">Generating aerial imagery…</div>
+    <div class="hud" id="hudTL">
+      <div class="spd mono"><span id="hSpd">0</span><small>km/h</small></div>
+      <div id="hAct" class="act">CRUISE</div>
+      <div id="hNav" class="nav">—</div>
+      <div class="rulesrow"><span class="slim"><small>MAXIMUM</small><b id="hLim">40</b></span><div id="hCtl" class="ctl">—</div></div>
+      <div class="row"><span>Accel</span><b id="hAcc">0.0 m/s²</b></div>
+      <div class="row"><span>Tracked objects</span><b id="hObj">0</b></div>
+      <div class="row"><span>Highest risk</span><b id="hRisk">0%</b></div>
+      <div class="row"><span>Decision latency</span><b id="hLat">0.00 ms</b></div>
+    </div>
+    <div class="hud" id="crunch"><div class="big" id="cTitle">CRUNCH TIME</div><div id="cBody"></div></div>
+    <div class="hud" id="zoomBtns"><button id="zIn" title="Zoom in">+</button><button id="zOut" title="Zoom out">−</button></div>
+    <div class="hud" id="legend">
+      <div><span><i style="background:var(--veh)"></i>Vehicle</span><span><i style="background:var(--ped)"></i>Pedestrian</span><span><i style="background:var(--ani)"></i>Animal</span><span><i style="background:var(--obj)"></i>Debris</span></div>
+      <div><span><i style="background:var(--ok)"></i>P &lt; 10%</span><span><i style="background:var(--warn)"></i>10–35%</span><span><i style="background:var(--bad)"></i>&gt; 35%</span></div>
+    </div>
+    <div class="hud" id="miniWrap"><canvas id="mini" width="340" height="340"></canvas></div>
+    <div class="hud" id="hint">Minimap click = book a ride · 1–6 tests · Space pause · H · T tilt</div>
+  </div>
+  <aside>
+    <div class="pagehead" data-page="overview"><div class="ptitle">🏠 Overview</div><div class="pintro">Live status of the robotaxi, plus buttons to inject crunch-time hazards and change how the map looks.</div></div>
+    <div class="sec" data-page="overview">
+      <h3>Ego vehicle</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Speed</div><div class="v" id="tSpd">0</div></div>
+        <div class="tile"><div class="k">Min TTC*</div><div class="v" id="tTtc">—</div></div>
+        <div class="tile"><div class="k">Trips done</div><div class="v" id="tTrips">0</div></div>
+        <div class="tile"><div class="k">Emerg. stops</div><div class="v" id="tEm">0</div></div>
+        <div class="tile"><div class="k">Collisions</div><div class="v" id="tCol">0</div></div>
+        <div class="tile"><div class="k">Avg latency</div><div class="v" id="tLat">0 ms</div></div>
+      </div>
+      <div class="note">*Time-to-collision if the car took no evasive action.</div>
+    </div>
+    <div class="sec" data-page="overview">
+      <h3>Crunch-time tests</h3>
+      <div class="grid2" id="scens"></div>
+      <div class="tg" style="margin-top:9px"><button id="tgChaos" class="on">Auto-spawn hazards</button><button id="tgSlow" class="on">Slow-mo on critical</button></div>
+    </div>
+    <div class="sec" data-page="overview">
+      <h3>View</h3>
+      <div class="tg">
+        <button id="tgHead" class="on">Heading-up (H)</button>
+        <button id="tgTilt">3D tilt (T)</button>
+        <button id="tgPred" class="on">Predicted paths</button>
+        <button id="tgRoute" class="on">Route + pure pursuit</button>
+        <button id="tgOdo" class="on">Odometry trails</button>
+        <button id="tgDist" class="on">Distance lines</button>
+        <button id="tgLidar" class="on">LiDAR returns</button>
+        <button id="tgPause">Pause (Space)</button>
+      </div>
+      <div class="speeds" id="speeds"></div>
+    </div>
+    <div class="pagehead" data-page="perception"><div class="ptitle">🎯 Perception & Decisions</div><div class="pintro">Every object within 60 m becomes a track. The planner predicts where each one will be over the next 4 s, scores six possible manoeuvres on collision risk, comfort and progress, and picks the cheapest. The radar shows everything from the car's own point of view.</div></div>
+    <div class="sec" data-page="perception">
+      <h3>Decision engine <span class="mono" style="letter-spacing:0;text-transform:none" id="dTick"></span></h3>
+      <div class="ahead"><span>Action</span><span>Cost</span><span>Risk</span><span>Cost</span></div>
+      <div id="actions"></div>
+      <div id="why">Path clear — nominal driving.</div>
+    </div>
+    <div class="sec" data-page="perception">
+      <h3>Tracked objects <span id="nTrk" class="mono" style="letter-spacing:0">0</span></h3>
+      <table><thead><tr><th>Object</th><th>Range</th><th>Fwd / Lat</th><th>Closing</th><th>TTC*</th><th>P</th></tr></thead><tbody id="objs"></tbody></table>
+      <div class="note">Fwd/Lat are in the car's own frame (+ ahead, R = right of the car). "Closing" is how fast the gap is shrinking. P is collision probability under the chosen plan; the faint figure is with no action.</div>
+    </div>
+    <div class="sec" data-page="perception">
+      <h3>Spatial awareness — ego frame</h3>
+      <div class="radarRow">
+        <canvas id="radar" width="340" height="340"></canvas>
+        <div class="near" id="near"></div>
+      </div>
+    </div>
+    <div class="pagehead" data-page="ride"><div class="ptitle">📱 Ride-hailing</div><div class="pintro">Riders book from their phone. GPS (±8 m) gets the taxi close; the phone's Bluetooth signal strength and UWB angle then pinpoint the rider so the taxi stops with its door beside them.</div></div>
+    <div class="sec" data-page="ride">
+      <h3>Ride-hailing — find the rider <button class="btn" id="reqRide">📱 Request ride</button></h3>
+      <div class="steps" id="rSteps"></div>
+      <div class="dest"><b id="rWho">Waiting for a request…</b><span class="mono" id="rPh" style="font-size:11px;color:var(--mute)"></span></div>
+      <div class="tiles" style="margin-top:8px">
+        <div class="tile"><div class="k">Phone GPS err</div><div class="v" id="rGps">—</div></div>
+        <div class="tile"><div class="k">RF fix err</div><div class="v" id="rEst" style="color:#b388ff">—</div></div>
+        <div class="tile"><div class="k">Particle σ</div><div class="v" id="rSd">—</div></div>
+        <div class="tile"><div class="k">BLE RSSI</div><div class="v" id="rRssi">—</div></div>
+        <div class="tile"><div class="k">RF range est</div><div class="v" id="rRng">—</div></div>
+        <div class="tile"><div class="k">UWB angle</div><div class="v" id="rAoa">—</div></div>
+        <div class="tile"><div class="k">Last door err</div><div class="v" id="rLast">—</div></div>
+        <div class="tile"><div class="k">Avg · RF</div><div class="v" id="rAvg" style="color:#38e1c6">—</div></div>
+        <div class="tile"><div class="k">Avg · GPS only</div><div class="v" id="rAvgG" style="color:#ff8a3d">—</div></div>
+      </div>
+      <div class="tg sm" style="margin-top:8px"><button id="tgAuto" class="on">Auto ride requests</button></div>
+      <div class="note" id="rQueue"></div>
+      <div class="note">Click the minimap to place a rider there. The phone's GPS (±8 m) gets the taxi close. Within 85 m the taxi hears the phone's BLE signal: signal strength gives range, and inside 35 m UWB adds the angle. A 500-particle filter, constrained to the sidewalk, narrows down the rider's position, and the taxi re-plans its stop to line its rear door up with them. "Door err" is how far the rider has to walk to the door.</div>
+    </div>
+    <div class="pagehead" data-page="nav"><div class="ptitle">🧭 Navigation & Steering</div><div class="pintro">Dijkstra plans the route over the street grid (no U-turns, turn penalties). Pure pursuit steers along it by aiming at a point one lookahead distance ahead and following the arc through it.</div></div>
+    <div class="sec" data-page="nav">
+      <h3>Navigation — current target</h3>
+      <div class="dest"><b id="dName">—</b><span class="mono" id="dPct" style="color:var(--mute);font-size:11px"></span></div>
+      <div class="prog"><i id="dProg" style="width:0%"></i></div>
+      <div class="tiles">
+        <div class="tile"><div class="k">Route left</div><div class="v" id="dRem">—</div></div>
+        <div class="tile"><div class="k">Straight-line</div><div class="v" id="dEuc">—</div></div>
+        <div class="tile"><div class="k">Bearing</div><div class="v" id="dBrg">—</div></div>
+        <div class="tile"><div class="k">ETA</div><div class="v" id="dEta">—</div></div>
+        <div class="tile"><div class="k">Turns left</div><div class="v" id="dTurns">—</div></div>
+        <div class="tile"><div class="k">Route total</div><div class="v" id="dTot">—</div></div>
+      </div>
+      <div class="loc" id="dLoc">—</div>
+      <div class="note">The route is planned with Dijkstra over the street grid (no U-turns, with turn penalties). It is re-planned live as the radio fix on the rider improves.</div>
+    </div>
+    <div class="sec" data-page="nav">
+      <h3>Path tracking — pure pursuit</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Lookahead L<sub>d</sub></div><div class="v" id="pLd">—</div></div>
+        <div class="tile"><div class="k">Steering δ</div><div class="v" id="pSteer">—</div></div>
+        <div class="tile"><div class="k">Turn radius</div><div class="v" id="pRad">—</div></div>
+        <div class="tile"><div class="k">Angle α</div><div class="v" id="pAlpha">—</div></div>
+        <div class="tile"><div class="k">Cross-track</div><div class="v" id="pCte">—</div></div>
+        <div class="tile"><div class="k">Heading err</div><div class="v" id="pHe">—</div></div>
+      </div>
+      <div class="note">δ = atan(2·L·sin α / L<sub>d</sub>), with wheelbase L = 2.8 m and L<sub>d</sub> = 2.5 + 0.5·v (clamped 3–10 m).</div>
+    </div>
+    <div class="pagehead" data-page="traffic"><div class="ptitle">🚦 Traffic Rules</div><div class="pintro">Every intersection downtown has a control: traffic lights on the big streets, all-way stops where two quiet streets meet, stop signs and yield signs where a side street meets a main one. Each street also has its own speed limit. The robotaxi, the other cars, the streetcars and the pedestrians all follow the same rules.</div></div>
+    <div class="sec" data-page="traffic">
+      <h3>Right now</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Speed limit</div><div class="v" id="rLim">—</div></div>
+        <div class="tile"><div class="k">Speed</div><div class="v" id="rSpd">—</div></div>
+        <div class="tile"><div class="k">Violations</div><div class="v" id="rViol">0</div></div>
+      </div>
+      <div class="loc" id="rNow">—</div>
+    </div>
+    <div class="sec" data-page="traffic">
+      <h3>Rule compliance this run</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Red-light stops</div><div class="v" id="rRed">0</div></div>
+        <div class="tile"><div class="k">Stop-sign stops</div><div class="v" id="rStop">0</div></div>
+        <div class="tile"><div class="k">Yields</div><div class="v" id="rYield">0</div></div>
+        <div class="tile"><div class="k">Time over limit</div><div class="v" id="rOver">0%</div></div>
+        <div class="tile"><div class="k">Worst overspeed</div><div class="v" id="rMax">0</div></div>
+        <div class="tile"><div class="k">Traffic lights</div><div class="v" id="rSig">—</div></div>
+      </div>
+      <div class="note" id="rPy">—</div>
+    </div>
+    <div class="sec" data-page="traffic">
+      <h3>Nearest intersections</h3>
+      <table><thead><tr><th>Where</th><th>Control</th><th>Dist</th><th style="text-align:left">State</th></tr></thead><tbody id="rNear"></tbody></table>
+    </div>
+    <div class="sec" data-page="traffic">
+      <h3>The rules it follows</h3>
+      <div class="rulelist">
+        <div><span class="ri sig"><i></i><i></i><i></i></span><div><b>Traffic lights</b> run a 46 s cycle: 18 s green, 3 s amber and 2 s all-red for each direction. On amber the car stops if it can do so braking under 3.2 m/s², otherwise it carries on through. Left turns on green wait for a gap in oncoming traffic.</div></div>
+        <div><span class="ri stop">STOP</span><div><b>Stop signs</b> need a full stop of at least one second at the line. At an all-way stop cars go in the order they arrived. At a two-way stop the side street waits for a safe gap in cross traffic.</div></div>
+        <div><span class="ri yld"></span><div><b>Yield signs</b> on Wellington mean slowing down and only entering when cross traffic leaves a gap of about 4 seconds.</div></div>
+        <div><span class="ri lim"><small>MAX</small>40</span><div><b>Speed limits</b> are 40 km/h on most streets, 50 on Front, Spadina and University, and 30 on John and York. The car slows down before it reaches a lower limit, not after.</div></div>
+        <div><span class="ri walk">🚶</span><div><b>Pedestrians</b> at traffic lights only start crossing when the walk phase has at least 9 s left. Jaywalkers in the hazard tests still ignore all of this, which is the point.</div></div>
+      </div>
+      <div class="note">The layout and speed limits are read from <b>data/toronto_downtown.osm</b> by Python with BeautifulSoup, so you can change any intersection there. The rule logic lives in <b>static/js/13-traffic.js</b>.</div>
+    </div>
+    <div class="pagehead" data-page="control"><div class="ptitle">🎛️ PID & Ziegler–Nichols</div><div class="pintro">A PID turns the planner's acceleration request into throttle or brake. Its gains come from Ziegler–Nichols: the plant's ultimate gain Ku and period Tu are recalculated at every coordinate, because speed, mass and road grip change them.</div></div>
+    <div class="sec" data-page="control">
+      <h3>Longitudinal control — PID <span class="badge" id="pWind" style="display:none">ANTI-WINDUP</span></h3>
+      <canvas class="chart" id="chSpd" width="712" height="208"></canvas>
+      <div class="clab"><span><i style="background:#fff"></i>v<sub>ref</sub></span><span><i style="background:#38e1c6"></i>speed</span><span><i style="background:#3ddc84"></i>throttle</span><span><i style="background:#ff4d5e"></i>brake</span></div>
+      <canvas class="chart" id="chPid" width="712" height="208"></canvas>
+      <div class="clab"><span><i style="background:#ffd84d"></i>P</span><span><i style="background:#b388ff"></i>I (integral)</span><span><i style="background:#4dd0ff"></i>D</span><span><i style="background:#7c90a3"></i>feed-forward</span><span><i style="background:#fff"></i>u total</span></div>
+      <div class="tiles" style="margin-top:8px">
+        <div class="tile"><div class="k">v<sub>ref</sub></div><div class="v" id="cRef">—</div></div>
+        <div class="tile"><div class="k">Error e</div><div class="v" id="cErr">—</div></div>
+        <div class="tile"><div class="k">Command u</div><div class="v" id="cU">—</div></div>
+        <div class="tile"><div class="k">P = Kp·e</div><div class="v" id="cP" style="color:#ffd84d">—</div></div>
+        <div class="tile"><div class="k">I = ∫Ki·e dt</div><div class="v" id="cI" style="color:#b388ff">—</div></div>
+        <div class="tile"><div class="k">D = −Kd·dv/dt</div><div class="v" id="cD" style="color:#4dd0ff">—</div></div>
+        <div class="tile"><div class="k">Feed-forward</div><div class="v" id="cFF">—</div></div>
+        <div class="tile"><div class="k">Accel</div><div class="v" id="cAcc">—</div></div>
+        <div class="tile"><div class="k">Road grade</div><div class="v" id="cGr">—</div></div>
+      </div>
+      <div class="tg sm" style="margin-top:8px"><button id="tgFF" class="on">Feed-forward</button></div>
+      <div class="note">Actuator: 80 ms dead time plus a 250 ms lag. Plant: 1850 kg (+80 kg per rider), aero drag, rolling resistance, hills, and 60 kW / 5.6 kN traction. Braking is limited by tire grip μ·g, so wet patches (μ 0.55) weaken it. The integral term stops accumulating while the actuator is saturated (anti-windup) and takes up hills and drag.</div>
+    </div>
+    <div class="sec" data-page="control">
+      <h3>Ziegler–Nichols — every coordinate</h3>
+      <div class="loc" id="zCoord" style="margin:0 0 8px">—</div>
+      <div class="tiles">
+        <div class="tile"><div class="k">Plant gain K</div><div class="v" id="zK">—</div></div>
+        <div class="tile"><div class="k">Time const τ</div><div class="v" id="zTau">—</div></div>
+        <div class="tile"><div class="k">Dead time θ</div><div class="v" id="zTh">—</div></div>
+        <div class="tile"><div class="k">Ultimate Ku</div><div class="v" id="zKu" style="color:#ffb020">—</div></div>
+        <div class="tile"><div class="k">Period Tu</div><div class="v" id="zTu" style="color:#ffb020">—</div></div>
+        <div class="tile"><div class="k">Surface μ</div><div class="v" id="zMu">—</div></div>
+      </div>
+      <table class="mini" style="margin-top:8px"><thead><tr><th>Tuning rule (click = use)</th><th>Kp</th><th>Ki</th><th>Kd</th><th>Ti / Td</th></tr></thead><tbody id="zRules"></tbody></table>
+      <canvas class="chart" id="chZn" width="712" height="208"></canvas>
+      <div class="clab"><span><i style="background:#4f8dff"></i>Ku when accelerating</span><span><i style="background:#ff8a3d"></i>Ku when braking</span><span><i style="background:rgba(80,140,255,.35)"></i>wet road</span><span><i style="background:#38e1c6"></i>you are here</span></div>
+      <h3 style="margin-top:12px">Coordinate log (every 5 m) <button class="btn" id="zCsv">Copy CSV</button></h3>
+      <table class="mini"><thead><tr><th>x, y (m)</th><th>v</th><th>μ</th><th>Ku</th><th>Tu</th><th>Kp</th><th>Ki</th><th>Kd</th></tr></thead><tbody id="zLog"></tbody></table>
+      <div class="note">The speed plant is linearized at each coordinate, using that point's speed, mass, grip and whether it's accelerating or braking: G(s) = K·e<sup>−θs</sup> / ((τs+1)(τ<sub>a</sub>s+1)). Solving ∠G(jω) = −180° gives ω<sub>u</sub>, then Ku = 1/|G(jω<sub>u</sub>)| and Tu = 2π/ω<sub>u</sub>. The PID gains are scheduled from these values five times a second.</div>
+    </div>
+    <div class="pagehead" data-page="localization"><div class="ptitle">📍 Localization</div><div class="pintro">Wheel-encoder and gyro odometry estimate where the car is, but they drift. Once a second a map-matched position fix pulls the estimate back.</div></div>
+    <div class="sec" data-page="localization">
+      <h3>Localization — odometry</h3>
+      <div class="tiles">
+        <div class="tile"><div class="k">Odometer</div><div class="v" id="oTot">0 m</div></div>
+        <div class="tile"><div class="k">Trip odom</div><div class="v" id="oTrip">0 m</div></div>
+        <div class="tile"><div class="k">Yaw rate</div><div class="v" id="oYaw">0°/s</div></div>
+        <div class="tile" style="grid-column:span 3"><div class="k">Estimated pose (trip frame: east / north / heading)</div><div class="v" id="oPose">—</div></div>
+        <div class="tile"><div class="k">Raw drift</div><div class="v" id="oRaw" style="color:#ff7ad9">0.0 m</div></div>
+        <div class="tile"><div class="k">Fused error</div><div class="v" id="oFus" style="color:#38e1c6">0.0 m</div></div>
+        <div class="tile"><div class="k">Last fix</div><div class="v" id="oFix">—</div></div>
+      </div>
+      <div class="trl"><span><i style="background:#ffffff"></i>Ground truth</span><span><i style="background:#ff5bd1"></i>Wheel + gyro dead-reckoning</span><span><i style="background:#38e1c6"></i>Fused estimate</span></div>
+    </div>
+    <div class="pagehead" data-page="python"><div class="ptitle">🐍 Python Analytics</div><div class="pintro">The Flask server receives this run's data every 2 s. pandas summarises it; scikit-learn fits the radio model and the trip-time model and finds risk hotspots; matplotlib builds the downloadable report.</div></div>
+    <div class="sec" data-page="python">
+      <h3>Python analytics <span style="display:flex;gap:6px"><a class="btn" href="/api/export.zip" download>⬇ Data (.zip)</a><a class="btn" href="/api/report.png" target="_blank">Report</a></span></h3>
+      <div id="pyBody"></div>
+      <div class="tg sm" style="margin-top:9px"><button id="tgRfFit" class="on">Use fitted radio model</button><button id="tgHot" class="on">Show hotspots</button></div>
+      <div class="note">Every 2 s the page sends its telemetry, events, pickups, trips, radio samples and Ziegler–Nichols log to the Flask server. pandas and scikit-learn analyse them there, and the results come back here. Some of them (the radio model and ETAs) are fed back into the simulation.</div>
+    </div>
+    <div class="pagehead" data-page="log"><div class="ptitle">📜 Event Log</div><div class="pintro">Everything the robotaxi decided or noticed, newest first.</div></div>
+    <div class="sec" data-page="log">
+      <h3>Event log</h3>
+      <div id="log"></div>
+    </div>
+    <div class="pagehead" data-page="about"><div class="ptitle">📘 How It Works</div><div class="pintro">The maths behind each part of the prototype.</div></div>
+    <div class="sec" data-page="about">
+      <details open>
+        <summary>How the model works</summary>
+        <p><b>Perception.</b> Every agent within 60 m becomes a track with a class, a 2D box and a confidence score. Confidence falls with range (<code>c = c₀ − 0.28·(d/60)^1.6</code>) plus a little sensor noise.</p>
+        <p><b>Prediction.</b> Vehicles use constant acceleration (clamped at a stop). Pedestrians and animals use constant velocity with positional uncertainty that grows over time, <code>σ(t) = σ₀ + k·t</code>. <code>k</code> depends on the class and on whether the object is in the road: a deer in the road gets far more spread than a pedestrian on the sidewalk.</p>
+        <p><b>Collision probability.</b> The ego car and other vehicles are capsules. For each candidate plan, the 4-second future is checked every 0.1 s. The closest-approach gap <code>d</code> becomes <code>p = exp(−d²/2σ²)</code>, discounted for time. A small proximity term adds risk for anything currently very close.</p>
+        <p><b>Decision.</b> Six maneuvers are rolled out and scored with <code>cost = 160·Rmax + 25·ΣR + comfort + progress</code>. The cheapest wins. Hysteresis prevents dithering, but a risky current plan is always replaced immediately. Measured decision latency is shown live.</p>
+        <p><b>Routing.</b> The street grid is a graph. Dijkstra searches over (intersection, arrival heading) states, so it never plans a U-turn, and it adds a small cost for right turns and a larger one for left turns. The route becomes a lane-centred path with curved turns, resampled every 0.5 m.</p>
+        <p><b>Pure pursuit.</b> The car is a kinematic bicycle model (wheelbase 2.8 m). Each tick it finds a point on the path one lookahead distance <code>L<sub>d</sub></code> ahead of the rear axle. It then steers along the arc that passes through that point: <code>κ = 2·y/L<sub>d</sub>²</code>, <code>δ = atan(L·κ)</code>, with a limit on how fast the wheel can turn. A "nudge" from the planner shifts the path sideways, and pure pursuit follows the shifted path.</p>
+        <p><b>Odometry.</b> Dead reckoning adds up wheel-encoder speed (with a 1–1.5% scale error and noise) and gyro yaw rate (with bias and noise), so the raw estimate drifts. Once a second a map-matched position fix (σ ≈ 0.25 m) pulls the fused estimate back with gain 0.55. That's a simple complementary filter, standing in for the EKF a production stack would use.</p>
+        <p><b>Ride-hailing.</b> A request carries the phone's GPS fix (σ ≈ 8 m, so it's often on the wrong side of the street). The taxi routes to the curb that GPS suggests. Once within radio range, every BLE signal reading (path-loss exponent 2.3, 3.5 dB noise) and UWB angle reading reweights a particle filter that only allows sidewalk positions. When the estimate shifts along the block, or flips to the other side of the street, the taxi re-plans its stop point.</p>
+        <p><b>Traffic rules.</b> Each intersection is a traffic light, an all-way stop, a two-way stop or a yield. Every car runs the same rule engine: it looks up the control for its approach, works out the distance from its front bumper to the stop line, and either holds there or proceeds. Holding works by placing a virtual stopped car on the stop line, so the normal car-following model brakes for it smoothly. The robotaxi turns the same decision into a speed limit on its acceleration, and each point on its route carries that street's speed limit.</p>
+        <p><b>PID + Ziegler–Nichols.</b> The planner's acceleration request is integrated into a reference speed. A PID with model-based feed-forward converts it into throttle or brake. Gains come from the Ziegler–Nichols ultimate gain and period of the plant linearized at the current coordinate, with your choice of tuning rule.</p>
+        <p><b>Python back-end.</b> Flask serves this page and the API. BeautifulSoup reads the Toronto map XML: street names, block styles, landmarks, streetcar routes and the speed limit. NumPy computes the Ziegler–Nichols profile for each new route. pandas logs and summarises the run. scikit-learn fits the radio path-loss model and the trip-time model, and DBSCAN finds risk hotspots. matplotlib builds the downloadable report. The 60 fps simulation and the drawing stay in JavaScript, because a round-trip to Python every frame would make it laggy. If the page is opened without the server it still runs, in offline mode.</p>
+      </details>
+    </div>
+  </aside>
+</main>
+<div class="modal" id="book" hidden>
+  <div class="mbox">
+    <div class="mhead"><div><div class="mtitle">Request a ride — downtown Toronto</div><div class="msub" id="bStep">Step 1 of 2 · Tap the map where you want to be picked up</div></div><button id="bClose" title="Close">✕</button></div>
+    <div class="mbody">
+      <canvas id="bmap" width="1520" height="1520"></canvas>
+      <div class="mside">
+        <div class="bcard act" id="bA"><span class="pin a"><span>A</span></span><div><div class="k">Pickup — you wait on the sidewalk</div><div class="t" id="bAtxt">Tap the map</div></div></div>
+        <div class="bcard" id="bB"><span class="pin b"><span>B</span></span><div><div class="k">Destination — drop-off at the curb</div><div class="t" id="bBtxt">Choose after pickup</div></div></div>
+        <div class="binfo" id="bInfo">Pickups snap to the nearest sidewalk and drop-offs to the nearest curb lane. Spots inside the outlined service area work best.</div>
+        <div class="binfo" id="bHover" style="color:var(--mute)"></div>
+        <div class="bbtns"><button class="btn" id="bBack">Back</button><button class="btn pri" id="bGo" disabled>Confirm ride</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+<!-- Scripts: order matters (later files use things defined in earlier ones). -->
+<script src="js/01-config.js"></script>
+<script src="js/02-texture.js"></script>
+<script src="js/03-agents.js"></script>
+<script src="js/04-navigation.js"></script>
+<script src="js/05-dynamics-pid.js"></script>
+<script src="js/06-ride-hailing.js"></script>
+<script src="js/07-planner.js"></script>
+<script src="js/08-scenarios.js"></script>
+<script src="js/09-simulation.js"></script>
+<script src="js/10-render.js"></script>
+<script src="js/11-booking.js"></script>
+<script src="js/13-traffic.js"></script>
+<script src="js/12-ui.js"></script>
+</body>
+</html>

@@ -1,236 +1,103 @@
-# Phantom6ix
+# Robotaxi Prototype — Downtown Toronto (Flask + Python data stack)
 
-### A digital prototype of a self driving robotaxi for downtown Toronto
+## Run it
 
-Phantom6ix drives itself through a simulated downtown core, from Spadina Avenue to Yonge Street and from Queen Street down to Front Street. It keeps an eye on every pedestrian, car, TTC streetcar and the occasional raccoon, predicts what each one will do next, and decides in under a millisecond whether to cruise, ease off, brake or steer around them.
+**Mac:** double-click **`Start Robotaxi.command`**. If macOS warns that it's from an unidentified developer, right-click it, choose **Open**, then **Open** again (only needed once).
+It installs the Python packages and opens **http://127.0.0.1:5000** in your browser. Leave the Terminal window open while you use it.
 
-You can book a ride on a map of downtown, watch the taxi find you using your phone's signal, and see it pull up with the door right beside you. Behind the scenes, a Python back end studies every trip, so the taxi gets better at finding riders and estimating arrival times the longer it drives.
+**Windows:** double-click **`start_windows.bat`**.
 
-<br>
-
-## Highlights
-
-**It sees and decides**
-
-- Tracks everything within 60 metres and rates how confident it is in each detection
-- Predicts where every object will be over the next four seconds and works out the chance of a collision
-- Compares six possible moves on safety, comfort and progress, then picks the best one
-- Handles crunch time moments on demand, like a jaywalker, a child chasing a ball, a raccoon frozen in the lane, a dog darting across, a sudden stop ahead and a driver running a red light
-
-**It drives**
-
-- Plans routes across the street grid with Dijkstra's algorithm
-- Steers with pure pursuit, a path tracking method used on real autonomous vehicles
-- Controls speed with a PID controller tuned by Ziegler Nichols at every point on the road, since speed, passenger weight and wet pavement all change how the car responds
-- Keeps track of its own position with wheel and gyro odometry and corrects the drift with regular map fixes
-
-**It picks you up**
-
-- Book a ride by tapping a pickup spot and a destination on a full map of downtown
-- The taxi heads to your phone's GPS location, which is usually off by several metres
-- Once it is close, it reads your phone's Bluetooth signal and direction and runs a particle filter to pinpoint exactly where you are standing
-- It then lines its rear door up with you, even if that means circling the block because GPS put you on the wrong side of the street
-
-**It learns from data**
-
-- The browser sends driving data to a Flask server every two seconds
-- pandas summarises each run
-- scikit-learn learns how your phone's signal fades with distance and feeds that straight back into the taxi
-- A second model learns real trip times and powers every ETA in the app
-- Clustering finds the intersections where risky moments keep happening and marks them on the map
-- One click downloads all the data as CSV files along with a full report
-
-<br>
-
-## Results
-
-| What I measured | Result |
-| --- | --- |
-| Door to rider distance using GPS alone | about 6 to 12 metres |
-| Door to rider distance using GPS plus the phone's signal | about 1 to 1.5 metres |
-| Phone signal model learned by scikit-learn | within 0.2 percent of the hidden true values |
-| Average speed tracking error | about 0.3 m/s |
-| Time to make each driving decision | well under 1 millisecond |
-| Collisions in 30 minute runs with constant hazards | zero in most runs |
-
-Before the signal model was trained, one pickup stopped 20 metres away from the rider. After training, every pickup landed within about a metre and a half.
-
-<br>
-
-## Getting started
-
-You will need Python 3.10 or newer.
-
-**On a Mac**
-
-1. Download or clone this repository
-2. Double click **Start Robotaxi.command**
-3. If macOS warns you about an unidentified developer, right click the file, choose Open, then click Open again
-4. Your browser opens at http://127.0.0.1:5000 and the top bar shows **python connected**
-
-**On Windows**
-
-1. Download or clone this repository
-2. Double click **start_windows.bat**
-
-**From the terminal**
-
+**Terminal (any OS):**
 ```bash
-git clone https://github.com/Vineet1100/Phantom6ix.git
-cd Phantom6ix
-pip install -r requirements.txt
-python app.py
+pip3 install -r requirements.txt
+python3 app.py              # opens http://127.0.0.1:5000
 ```
 
-You can also open `static/index.html` by itself. The simulation runs fully, just without the Python analytics.
+Opening `static/index.html` directly (double-clicking it) also works, but in **offline mode**: the simulation runs and
+the page says "python offline", with no Python analytics. For the full version use the launcher, which serves
+the page at http://127.0.0.1:5000.
 
-<br>
+## What runs in Python, and why
 
-## Controls
+| Job | Where | Library |
+|---|---|---|
+| Web server + API | `app.py` | **Flask** |
+| City map: street names, block styles, landmarks, TTC routes, speed limits, traffic lights, stop and yield signs | `robotaxi/citymap.py` + `data/toronto_downtown.osm` | **BeautifulSoup** |
+| Vehicle parameters (mass, power, delays) | `robotaxi/vehicle.py` | — (single source of truth, sent to the browser) |
+| Ziegler–Nichols Ku/Tu profile for every new route | `robotaxi/zn.py` | **NumPy** (vectorised bisection) |
+| Logging telemetry, events, pickups, trips, radio samples, ZN log | `robotaxi/store.py` | **pandas** |
+| Summary statistics | `robotaxi/analytics.py` → `summary` | **pandas** |
+| Radio path-loss calibration (fed back into the particle filter) | `analytics.py` → `rf_calibration` | **scikit-learn** LinearRegression |
+| Trip-time / ETA model (used for every ETA on the page) | `analytics.py` → `eta_model` | **scikit-learn** LinearRegression |
+| Risk hotspots (red dashed circles on the map) | `analytics.py` → `hotspots` | **scikit-learn** DBSCAN |
+| Ziegler–Nichols by surface/mode | `analytics.py` → `zn_by_condition` | **pandas** groupby |
+| Traffic-rule compliance: time over each street's limit, stops at lights, stop and yield signs | `analytics.py` → `rules_check` | **pandas** |
+| Downloadable report + CSV zip | `robotaxi/report.py` | **matplotlib**, pandas |
 
-| Action | What it does |
-| --- | --- |
-| Request a ride, the B key or clicking the minimap | Opens the booking map |
-| Keys 1 to 6 | Triggers a crunch time scenario |
-| Space | Pauses the simulation |
-| H | Switches between heading up and north up |
-| T | Tilts the map into 3D |
-| Scroll | Zooms in and out |
+**Kept in JavaScript on purpose:** the real-time simulation (traffic, perception, collision risk, decisions, PID loop,
+pure pursuit, rider particle filter) and all drawing. These run 30–60 times a second, and a round-trip to Python for
+every frame would make the car react late and the map stutter. Routing also stays in JS, because the car re-plans
+mid-drive many times a second as the radio fix improves.
 
-The sidebar on the left has a page for each part of the system: Overview, Perception and Decisions, Ride Hailing, Navigation and Steering, PID and Ziegler Nichols, Localization, Python Analytics, Event Log and How It Works.
+## How the two halves talk
 
-<br>
-
-## Headless simulator
-
-The whole simulation also runs in Python with no graphics: the same streets, traffic, hazards, planner, PID controller and particle filter as the browser. It runs about 15 times faster than real time, so you can do long runs, many seeds and before and after comparisons from the terminal.
-
-```bash
-python -m robotaxi.sim --minutes 30 --seed 7              # one 30 minute run
-python -m robotaxi.sim --runs 6 --minutes 10 --calibrate  # retrain the phone signal model after every run
-python -m robotaxi.sim --minutes 10 --export run.zip      # same CSVs and report as the web app's download
-python -m robotaxi.sim --help                             # all options
+```
+browser (static/js)                         Flask (app.py + robotaxi/)
+ start-up ── GET  /api/map ───────────────► BeautifulSoup map + vehicle params
+ new route ─ POST /api/zn_profile ────────► NumPy Ziegler–Nichols along the route
+ every 2 s ─ POST /api/ingest ────────────► pandas store (telemetry, events, pickups, trips, rf, zn_log)
+ every 4 s ─ GET  /api/analytics ◄──────── pandas summary + scikit-learn fits + DBSCAN hotspots
+ buttons ─── GET  /api/export.zip, /api/report.png (matplotlib)
 ```
 
-Every run records the same tables the browser sends to Flask, so the pandas and scikit-learn analytics and the report work on it unchanged. With `--calibrate`, the radio model learned from earlier runs is fed into the particle filter for the next run, the same way the browser picks it up from the server.
+## Project layout / what to change where
 
-It is a line for line port of the browser code, and the tests check it against the JavaScript: the seeded wet patches, hills and Ziegler Nichols numbers match exactly, and runs of the two versions give the same distances, trip counts and pickup accuracy.
-
-Six 10 minute runs with a crunch time test every 9 to 15 seconds and the phone signal model retrained after each run (`python -m robotaxi.sim --runs 6 --minutes 10 --calibrate`):
-
-| What I measured | Result |
-| --- | --- |
-| Door to rider distance using GPS plus the phone's signal | 1.7 m on average; 1.0 to 1.9 m per run once the model is trained |
-| Door to rider distance if the taxi had trusted GPS alone | 9.0 m on average |
-| Phone signal model learned by scikit-learn | P0 -40.9 dBm and n 2.30, against true values of -41 and 2.3 |
-| Average speed tracking error | 0.23 to 0.27 m/s |
-| Crunch time tests survived | 153 tests across 60 minutes; 4 of 6 runs had no contact at all |
-
-<br>
-
-## Tests
-
-```bash
-pip install pytest
-pytest
 ```
-
-The tests cover routing to every block, path smoothness, pure pursuit tracking, the PID controller on wet and dry roads, braking for a child in the lane, the particle filter finding a rider, every crunch time test without a collision, learning the phone signal model, and the Flask API fed with a headless run. GitHub Actions runs them on every push.
-
-<br>
-
-## How it is built
-
-The live simulation and graphics run in the browser at 60 frames per second, while everything to do with data runs in Python. Sending every frame to Python and back would make the car react late, so each side does what it is best at. The headless simulator in `robotaxi/sim` runs the same simulation in Python when no one needs to watch it.
-
-| Tool | What it does here |
-| --- | --- |
-| Flask | Runs the web server and API |
-| BeautifulSoup | Reads the downtown Toronto map file with streets, landmarks, streetcar routes and the speed limit |
-| NumPy | Calculates Ziegler Nichols tuning along every new route |
-| pandas | Logs every run, builds summaries and exports CSV files |
-| scikit-learn | Learns the phone signal model and trip times, and finds risk hotspots |
-| matplotlib | Creates the downloadable run report |
-| JavaScript and HTML Canvas | Runs the real time simulation, decisions, control and graphics |
-| Python headless simulator | Runs the same simulation with no graphics, for long batch runs, tests and before and after comparisons |
-| pytest | Checks the routing, physics, planner, particle filter, server and whole runs |
-
-<br>
-
-## Project layout
-
-```text
-app.py                     Flask server
-requirements.txt           Python packages
-pyproject.toml             Test settings
-Start Robotaxi.command     Mac launcher
-start_windows.bat          Windows launcher
-
-data/
-  toronto_downtown.osm     Streets, landmarks, streetcar routes and speed limit
-
+app.py                     Flask routes (add a new API endpoint here)
+requirements.txt
+data/toronto_downtown.osm  THE MAP: street names, block style per block, landmarks, streetcar routes,
+                           speed limit per street, and the control at every intersection
 robotaxi/
-  citymap.py               Reads the map with BeautifulSoup
-  vehicle.py               Car weight, motor power and braking delay
-  zn.py                    Ziegler Nichols maths with NumPy
-  store.py                 Holds incoming data for pandas
-  analytics.py             Statistics, learned models and hotspots
-  report.py                Report and CSV export
-  sim/                     Headless simulator (python -m robotaxi.sim)
-    common.py              Grid, lanes, geometry and object classes
-    agents.py              Cars, streetcars, people and animals
-    navigation.py          Routing, pure pursuit and odometry
-    dynamics.py            Vehicle physics, PID and Ziegler Nichols
-    ride_hailing.py        Ride requests, phone signal and particle filter
-    planner.py             Prediction, collision risk and decisions
-    scenarios.py           Crunch time tests
-    world.py               World setup, each step and the recorded tables
-    cli.py                 Batch runs from the terminal
-
-tests/                     pytest suite
-
-static/
-  index.html               Page layout and sidebar
-  css/styles.css           Colours and styling
-  js/01-config.js          Settings and the link to Python
-  js/02-texture.js         Draws the city and its landmarks
-  js/03-agents.js          Cars, streetcars, people and animals
-  js/04-navigation.js      Routing, steering and odometry
-  js/05-dynamics-pid.js    Vehicle physics, PID and Ziegler Nichols
-  js/06-ride-hailing.js    Ride requests and finding the rider
-  js/07-planner.js         Collision risk and decision making
-  js/08-scenarios.js       Crunch time tests
-  js/09-simulation.js      World setup and each simulation step
-  js/10-render.js          Drawing the map
-  js/11-booking.js         Booking map
-  js/12-ui.js              Panels, controls and sidebar pages
+  citymap.py               XML → JSON for the browser
+  vehicle.py               car mass, motor power, actuator delays
+  zn.py                    Ziegler–Nichols maths (NumPy)
+  store.py                 what gets logged + row limits
+  analytics.py             statistics, ML models, hotspot settings (DBSCAN eps / min_samples)
+  report.py                matplotlib report layout, export contents
+static/index.html          page layout: left navigation, map, and one panel page per concept (served at / by Flask)
+static/css/styles.css      colours / styling
+static/js/01-config.js     constants, object sizes, risk-model numbers, Python bridge (PY / OUT / api)
+static/js/02-texture.js    drawing of buildings and landmarks
+static/js/03-agents.js     cars, streetcars, people, animals
+static/js/04-navigation.js routing, pure pursuit, odometry
+static/js/05-dynamics-pid.js  PID + live Ziegler–Nichols (asks Python for route profiles)
+static/js/06-ride-hailing.js  ride flow, radio model (RF truth vs RF_MODEL fitted in Python)
+static/js/07-planner.js    collision risk + decision cost
+static/js/08-scenarios.js  crunch-time tests 1–6
+static/js/09-simulation.js world setup, step, telemetry sampling
+static/js/10-render.js     drawing the map view (+ hotspots)
+static/js/11-booking.js    A → B booking map (ETAs from the Python model)
+static/js/12-ui.js         panels, controls, start-up, Python sync + analytics panel
+static/js/13-traffic.js    traffic lights, stop / yield signs, speed limits, walk signals, signs on the map
 ```
 
-<br>
+| I want to change… | Edit |
+|---|---|
+| Street names, which landmark is on which block, streetcar routes, speed limits | `data/toronto_downtown.osm` |
+| Which intersection has a light, stop sign or yield sign | `data/toronto_downtown.osm` (`highway=traffic_signals`, `stop`, `give_way`) |
+| Light timing, how cars behave at stop signs, amber decision | `static/js/13-traffic.js` → `SIGT`, `ctrlDecide` |
+| Car mass / motor power / braking delay | `robotaxi/vehicle.py` |
+| What the analytics compute, hotspot sensitivity | `robotaxi/analytics.py` (`DBSCAN(eps=10, min_samples=4)`) |
+| Charts in the downloadable report | `robotaxi/report.py` |
+| The phone's true radio behaviour vs. the taxi's starting guess | `static/js/06-ride-hailing.js` → `RF` (truth) and `RF_MODEL` (initial guess) |
+| How often data is sent / analysed | `static/js/12-ui.js` → `setInterval(pushToPython,2000)`, `setInterval(pullAnalytics,4000)` |
+| Everything else about the simulation | see the `static/js` table above |
 
-## Want to tweak it?
+## Concept pages (left sidebar)
 
-| To change | Look in |
-| --- | --- |
-| Street names, landmarks, streetcar routes or the speed limit | `data/toronto_downtown.osm` |
-| Car weight, motor power or braking delay | `robotaxi/vehicle.py` |
-| How cautious the car drives | `static/js/07-planner.js` and `robotaxi/sim/planner.py` |
-| How accurate the phone's GPS is | `static/js/06-ride-hailing.js` and `robotaxi/sim/ride_hailing.py` |
-| How many cars, people and animals appear | `static/js/09-simulation.js`, or `Population` in `robotaxi/sim/world.py` |
-| What the analytics calculate | `robotaxi/analytics.py` |
-| The charts in the report | `robotaxi/report.py` |
-| Colours and styling | `static/css/styles.css` |
+The left sidebar switches the right-hand panel between pages: **Overview, Perception & Decisions, Ride-hailing,
+Navigation & Steering, Traffic Rules, PID & Ziegler–Nichols, Localization, Python Analytics, Event Log, How It Works**.
+Each page has a short intro explaining the concept. Pages have their own links (e.g. `http://127.0.0.1:5000/#control`).
 
-<br>
-
-## Good to know
-
-This is a prototype built to explore how an autonomous taxi thinks. It is not software for a real vehicle.
-
-- The map is a simplified grid that uses real downtown Toronto street names, and the landmarks are stylised rather than exact
-- The sensors are simulated, so detections come from the simulator with added noise and buildings do not block the view
-- There are no traffic lights, and other cars yield to the taxi at intersections except for the red light runner test
-- Real autonomous vehicles usually run C++ and ROS on board, with Python used for tools and machine learning
-- The driving logic lives in two places, the browser and the headless simulator, so a change to one should be made in the other too. The tests that compare them against the JavaScript will catch some differences, not all
-
-<br>
+To move a panel to a different page, change its `data-page="…"` in `static/index.html`. To add a page, add a link
+in `<nav id="pnav">` and give its sections the same `data-page` id.

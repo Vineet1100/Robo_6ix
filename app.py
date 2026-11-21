@@ -59,14 +59,15 @@ def api_analytics():
 @app.post("/api/zn_profile")
 def api_zn_profile():
     d = request.get_json(force=True)
-    return jsonify(route_profile(d["s"], d["k"], d["mu"], float(d["mass"]), float(d["vlim"])))
+    return jsonify(route_profile(d["s"], d["k"], d["mu"], float(d["mass"]), d["vlim"]))   # vlim: one limit per point
 
 
 @app.get("/api/eta")
 def api_eta():
     length, turns = float(request.args.get("length", 0)), int(request.args.get("turns", 0))
+    controls = int(request.args.get("controls", 0))
     model = cached_analysis(5)["eta"]
-    return jsonify(seconds=round(predict_eta(model, length, turns), 1), model="scikit-learn LinearRegression" if model else "heuristic (needs 3+ trips)")
+    return jsonify(seconds=round(predict_eta(model, length, turns, controls), 1), model="scikit-learn LinearRegression" if model else "heuristic (needs 3+ trips)")
 
 
 @app.get("/api/report.png")
