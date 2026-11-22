@@ -154,7 +154,7 @@ function setupPythonUI(){
 
 setTimeout(async()=>{
   await connectPython();
-  setupTraffic();const tg=buildTexture();initWorld(tg);setupUI();ctl.vref=ego.v;ctl.vPrev=ego.v;makeRequest();ego.nominal=egoNominal();resize();plan();setupPythonUI();
+  setupTraffic();const tg=await buildTexture();initWorld(tg);setupUI();ctl.vref=ego.v;ctl.vPrev=ego.v;makeRequest();ego.nominal=egoNominal();resize();plan();setupPythonUI();
   $('loading').style.display='none';
   logE('Robotaxi online — perception, prediction and planning running at 10 Hz','info');
   requestAnimationFrame(t=>{last=t;requestAnimationFrame(frame);});

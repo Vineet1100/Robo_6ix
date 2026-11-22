@@ -55,7 +55,10 @@ function buildPath(x,y,d,seq,dest){
     px[q]=ctrl[sg][0]+(ctrl[sg+1][0]-ctrl[sg][0])*u;py[q]=ctrl[sg][1]+(ctrl[sg+1][1]-ctrl[sg][1])*u;}
   for(let q=0;q<n;q++){const a=Math.max(0,q-1),b=Math.min(n-1,q+1);let ax=px[b]-px[a],ay=py[b]-py[a];const l=Math.hypot(ax,ay)||1;tx[q]=ax/l;ty[q]=ay/l;}
   for(let q=1;q<n-1;q++)kk[q]=angDiff(Math.atan2(ty[q-1],tx[q-1]),Math.atan2(ty[q+1],tx[q+1]))/(2*DS);
-  const nodes=turnAt.map(t=>{let bq=0,bd=1e9;for(let q=0;q<n;q+=2){const e=(px[q]-t.n.i*P)**2+(py[q]-t.n.j*P)**2;if(e<bd){bd=e;bq=q;}}return{i:t.n.i,j:t.n.j,q:bq,turn:t.turn,onto:t.onto};});
+  // match each intersection to the path IN ORDER: a route that loops round a block passes the same one twice
+  let q0=0;const nodes=turnAt.map(t=>{const d2=q=>(px[q]-t.n.i*P)**2+(py[q]-t.n.j*P)**2;let q=q0;
+    while(q<n-1&&d2(q)>81)q++;while(q<n-1&&d2(q+1)<=d2(q))q++;q0=Math.min(n-1,q+1);
+    return{i:t.n.i,j:t.n.j,q,turn:t.turn,onto:t.onto};});
   const R={px,py,tx,ty,k:kk,n,len:L,nodes,dest,name:destName(dest)};annotateRoute(R);return R;   // speed limits + stop lines (13-traffic.js)
 }
 function randomDest(){const A={i:Math.floor(Math.random()*(N+1)),j:Math.floor(Math.random()*(N+1))};const ds=[0,1,2,3].filter(dd=>inGrid({i:A.i+DIR[dd][0],j:A.j+DIR[dd][1]}));return{a:A,dd:pick(ds),frac:rnd(.3,.7)};}
@@ -104,9 +107,11 @@ function egoNominal(){
   if(!r)return-2;
   const i0=ego.pi;let gap=1e9,lv=0;
   for(const o of actors){if(o.kind!=='car')continue;if(Math.abs(o.x-ego.x)>50||Math.abs(o.y-ego.y)>50)continue;
-    let bq=-1,bd=1e9;for(let q=i0;q<Math.min(r.n,i0+100);q+=2){const e=(r.px[q]-o.x)**2+(r.py[q]-o.y)**2;if(e<bd){bd=e;bq=q;}}
-    if(bq<0||bd>1.8*1.8)continue;const oh=DIR[o.d],dot=oh[0]*r.tx[bq]+oh[1]*r.ty[bq];if(dot<.5)continue;
-    const g=(bq-i0)*DS-ego.L/2-o.L/2;if(g<gap){gap=g;lv=o.v*dot;}}
+    const near=(px,py)=>{let bq=-1,bd=1e9;for(let q=i0;q<Math.min(r.n,i0+100);q+=2){const e=(r.px[q]-px)**2+(r.py[q]-py)**2;if(e<bd){bd=e;bq=q;}}return[bq,bd];};
+    const oh=DIR[o.d],[bq,bd]=near(o.x,o.y);if(bq<0)continue;const dot=oh[0]*r.tx[bq]+oh[1]*r.ty[bq];
+    if(bd<=1.8*1.8&&dot>=.5){const g=(bq-i0)*DS-ego.L/2-o.L/2;if(g<gap){gap=g;lv=o.v*dot;}continue;}   // a car ahead going our way: follow it
+    const hl=o.L/2-.6;for(const k of [-hl,0,hl]){const[q2,d2]=near(o.x+oh[0]*k,o.y+oh[1]*k);   // any other car whose body is on our path
+      if(q2>=0&&d2<=1.7*1.7){const g=(q2-i0)*DS-ego.L/2-.6;if(g<gap){gap=g;lv=Math.max(0,o.v*dot);}}}}
   if(gap<1e8){const ss=2+v*1.3+v*(v-lv)/(2*Math.sqrt(1.6*2.5));acc=1.6*(1-Math.pow(v/vd,4)-Math.pow(Math.max(ss,0)/Math.max(gap,.1),2));}
   if(ego.ruleAcc!=null)acc=Math.min(acc,ego.ruleAcc);       // traffic lights, stop / yield signs, lower limit ahead
   for(let q=i0;q<Math.min(r.n,i0+70);q+=2){const k=Math.abs(r.k[q]);if(k<.03)continue;const vc=Math.sqrt(2.2/k),dist=Math.max((q-i0)*DS-1,.5);if(v>vc)acc=Math.min(acc,(vc*vc-v*v)/(2*dist));}

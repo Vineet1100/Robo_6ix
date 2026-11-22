@@ -73,8 +73,15 @@ function oncomingClear(c,self){
     if(o.d!==(sd+2)%4)continue;const A=approachInfo(o,c);if(Math.abs(A.perp)>4.5||A.dI<-2)continue;
     if(turnAtNode(o,c)==='left')continue;
     if(inBox(o,c)&&o.v>.2)return false;
-    if(o.v>.5&&A.dI-STOPL<Math.max(o.v,3)*4+4)return false;}
+    if(o.v>.5&&A.dI-STOPL<Math.max(o.v,3)*4+4)return false;
+    if(A.dI-STOPL<5&&((o.cs&&o.cs.key===c.key&&o.cs.go)||(c.type==='signal'&&sigState(c,axisOf(o.d)).s==='G')))return false;}   // at its line with a green / its turn
   return true;
+}
+// An oncoming vehicle that has already been given its turn to go left across our path.
+function oncomingLeftGo(c,self){
+  for(const o of actors){if(o===self||!isVeh(o)||o.d!==(self.d+2)%4)continue;const A=approachInfo(o,c);
+    if(o.cs&&o.cs.key===c.key&&o.cs.go&&Math.abs(A.perp)<4.5&&A.dI>-2&&A.dI<18&&turnAtNode(o,c)==='left')return true;}
+  return false;
 }
 function turnAtNode(o,c){
   if(o.kind==='ego'){const nd=route&&route.nodes.find(n=>n.i===c.i&&n.j===c.j&&n.q>=ego.pi-30);return nd?nd.turn:null;}
@@ -82,11 +89,11 @@ function turnAtNode(o,c){
   return p.d2===(o.d+3)%4?'left':p.d2===(o.d+1)%4?'right':null;
 }
 // The rule engine shared by every car and by the robotaxi. g = distance from the front bumper to the stop line.
-function ctrlDecide(a,c,axis,g,turn){
+function ctrlDecide(a,c,axis,g,turn,visit){   // visit: tells repeat visits to one intersection apart (looping routes)
   const rule=approachRule(c,axis);
   if(rule==='free'&&turn!=='left')return{hold:false,rule};
-  if(!a.cs||a.cs.key!==c.key)a.cs={key:c.key,t0:-1,done:false,go:false,ygo:null,tDone:0,lw:false};
-  const cs=a.cs,v=a.v;
+  if(!a.cs||a.cs.key!==c.key||a.cs.visit!==visit||simT-(a.cs.tSeen??simT)>5)a.cs={key:c.key,visit,t0:-1,done:false,go:false,ygo:null,tDone:0,lw:false};
+  const cs=a.cs,v=a.v;cs.tSeen=simT;
   if(rule==='free'){                                                        // main road, turning left: wait for oncoming traffic
     if(cs.go)return{hold:false,rule};if(oncomingClear(c,a)){if(g<3)cs.go=true;return{hold:false,rule};}return{hold:true,rule,why:'left'};}
   if(rule==='signal'){
@@ -110,12 +117,13 @@ function ctrlDecide(a,c,axis,g,turn){
     c.q=c.q.filter(o=>o.cs&&o.cs.key===c.key&&!o.cs.go&&actors.includes(o));
     const qok=c.type!=='allstop'||c.q[0]===a||simT-cs.tDone>6;
     // after 8 s of waiting at the line, accept a tighter gap in cross traffic
-    if(qok&&crossClear(c,axis,a,simT-cs.tDone>8?2.3:3.5)){cs.go=true;c.q=c.q.filter(o=>o!==a);return{hold:false,rule};}
+    const clear=crossClear(c,axis,a,simT-cs.tDone>8?2.3:3.5)&&(turn!=='left'||oncomingClear(c,a))&&!oncomingLeftGo(c,a);
+    if(qok&&clear){cs.go=true;c.q=c.q.filter(o=>o!==a);return{hold:false,rule};}
     return{hold:true,rule,why:c.type==='allstop'&&!qok?'queue':'gap'};
   }
   // yield
   if(cs.go)return{hold:false,rule};
-  if(crossClear(c,axis,a,4)){if(g<6)cs.go=true;return{hold:false,rule};}
+  if(crossClear(c,axis,a,4)&&(turn!=='left'||oncomingClear(c,a))){if(g<6)cs.go=true;return{hold:false,rule};}
   return{hold:true,rule,why:'yield'};
 }
 // NPC cars and streetcars: distance to a stop line they must hold at (1e9 if none).
@@ -145,13 +153,13 @@ function egoRules(dt,v){
   const q0=Math.min(ego.pi,r.n-1),sOff=(ego.x-r.px[q0])*r.tx[q0]+(ego.y-r.py[q0])*r.ty[q0];   // sub-sample position along the path
   for(const nd of r.nodes){const c=nd.ctrl;if(!c)continue;
     const g=(nd.qs-ego.pi)*DS-sOff-ego.L/2;if(g<-.6){                      // crossed this stop line
-      if(!nd.passed){nd.passed=true;const cs=ego.cs&&ego.cs.key===c.key?ego.cs:null,rl=approachRule(c,axisOf(nd.ad));
+      if(!nd.passed){nd.passed=true;const cs=ego.cs&&ego.cs.key===c.key&&ego.cs.visit===nd.q?ego.cs:null,rl=approachRule(c,axisOf(nd.ad));
         if(cs&&!cs.passed){cs.passed=true;
         if(rl==='signal'&&sigState(c,axisOf(nd.ad)).s==='R'&&!(cs&&(cs.ygo||cs.go))){rules.violations++;logE(`🚨 Entered ${c.name} on a red light`,'bad');}
         if(rl==='stop'&&!cs.done){rules.violations++;logE(`🚨 Rolled through the stop sign at ${c.name}`,'bad');}}}
       continue;}
     if(g>75)break;
-    const res=ctrlDecide(ego,c,axisOf(nd.ad),g,nd.turn);
+    const res=ctrlDecide(ego,c,axisOf(nd.ad),g,nd.turn,nd.q);
     ego.ctl={c,g,nd,res,rule:res.rule,st:res.st,hold:res.hold,why:res.why};
     if(res.hold){const gs=g-1.2;                                       // aim to stop 1.2 m before the line
       acc=Math.min(acc,gs<=0?(v>.05?-3.5:-1):clamp((Math.sqrt(2*2.2*gs)-v)*1.8,-6.5,1.2));
@@ -177,23 +185,15 @@ function walkNeed(n,t){if(!t||t.i!==n.i||t.j!==n.j)return null;const c=ctrlAt(n.
 function walkOK(w){
   if(w.c&&w.c.type==='signal'){const st=sigState(w.c,w.axis);if(st.s!=='G'||st.rem<=WALK_MIN)return false;}
   for(const o of actors){if(!(o.kind==='car'||o.kind==='ego'))continue;const dd=Math.hypot(o.x-w.mx,o.y-w.my);
-    if(dd<5.5)return false;
+    if(dd<3||(dd<5.5&&o.v>.3))return false;   // a stopped car at the crossing: walk in front of it
     if(o.v>1&&dd<Math.max(14,o.v*3.2)){const h=o.kind==='ego'?[Math.cos(ego.th),Math.sin(ego.th)]:DIR[o.d];if((w.mx-o.x)*h[0]+(w.my-o.y)*h[1]>-2)return false;}}
   return true;}
 // ============================== drawing ==============================
 // world point at `back` metres upstream of the centre and `right` metres to the right of an approach heading d
 function appPt(c,d,back,right){const hx=horiz(d),s=sgnD(d),rr=rightV(d)[hx?1:0],al=(hx?c.i:c.j)*P-s*back,pp=(hx?c.j:c.i)*P+rr*right;return hx?{x:al,y:pp}:{x:pp,y:al};}
 const approaches=c=>[0,1,2,3].filter(d=>inGrid({i:c.i-DIR[d][0],j:c.j-DIR[d][1]}));
-function fillApp(g,c,d,b1,b2,r1,r2){const p=appPt(c,d,b1,r1),q=appPt(c,d,b2,r2);g.fillRect(Math.min(p.x,q.x),Math.min(p.y,q.y),Math.abs(q.x-p.x),Math.abs(q.y-p.y));}
-// Static markings baked into the aerial texture: no stop line where traffic has right of way, shark teeth at yields, STOP painted on the road.
-function paintControls(g){
-  for(const c of Object.values(CTRL))for(const d of approaches(c)){const rule=approachRule(c,axisOf(d));
-    if(rule==='free'||rule==='yield'){g.fillStyle='#3b3e42';fillApp(g,c,d,STOPL-.05,STOPL+.5,.25,3.75);}
-    if(rule==='yield'){g.fillStyle='rgba(238,238,232,.9)';for(let k=0;k<5;k++){const a=appPt(c,d,STOPL+.05,.45+k*.68),b=appPt(c,d,STOPL+.05,.45+k*.68+.5),t=appPt(c,d,STOPL+.85,.45+k*.68+.25);
-      g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.lineTo(t.x,t.y);g.closePath();g.fill();}}
-    if(rule==='stop'){const p=appPt(c,d,STOPL+3.2,2);g.save();g.translate(p.x,p.y);g.rotate(Math.atan2(DIR[d][1],DIR[d][0])+Math.PI/2);
-      g.fillStyle='rgba(238,238,232,.85)';g.font='bold 1.5px Inter, Arial, sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText('STOP',0,0);g.restore();}}
-}
+// The static markings (no stop line where traffic has right of way, yield teeth, STOP lettering) are
+// painted into the aerial image by robotaxi/texture.py in Python.
 const SIGCOL={G:'#2bd96b',Y:'#ffbf1f',R:'#ff3b4a'};
 // Live world-space overlay: glowing signal bars on the stop lines.
 function drawTrafficWorld(c2,ep){

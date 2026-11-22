@@ -3,7 +3,8 @@
     python app.py            -> http://127.0.0.1:5000
 
 The browser runs the real-time simulation and drawing (60 fps needs to stay client-side).
-Python does the data work: the map (BeautifulSoup), Ziegler–Nichols route profiles (NumPy),
+Python does everything else: the aerial city image (Pillow + NumPy), the map (BeautifulSoup),
+Ziegler–Nichols route profiles (NumPy),
 logging + statistics (pandas), radio-model calibration, trip-time model and hotspot
 clustering (scikit-learn), and the downloadable report (matplotlib).
 """
@@ -19,6 +20,7 @@ from robotaxi.analytics import analyze, predict_eta
 from robotaxi.citymap import load_map
 from robotaxi.report import export_zip, report_png
 from robotaxi.store import STORE
+from robotaxi.texture import texture_jpeg
 from robotaxi.zn import route_profile
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +72,12 @@ def api_eta():
     return jsonify(seconds=round(predict_eta(model, length, turns, controls), 1), model="scikit-learn LinearRegression" if model else "heuristic (needs 3+ trips)")
 
 
+@app.get("/api/texture.jpg")
+def api_texture():
+    # the aerial city image, drawn once in Python with Pillow + NumPy (robotaxi/texture.py)
+    return Response(texture_jpeg(), mimetype="image/jpeg", headers={"Cache-Control": "max-age=3600"})
+
+
 @app.get("/api/report.png")
 def api_report():
     return Response(report_png(frames()), mimetype="image/png")
@@ -90,5 +98,6 @@ if __name__ == "__main__":
     url = f"http://127.0.0.1:{args.port}/"
     if not args.no_browser:
         threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    threading.Thread(target=texture_jpeg, daemon=True).start()   # start drawing the city right away
     print(f"Robotaxi prototype: {url}")
     app.run(host="127.0.0.1", port=args.port, debug=False, threaded=True)
